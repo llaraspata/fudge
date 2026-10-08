@@ -1,0 +1,47 @@
+# Datasets and models (base LLMs) to test.
+#
+# The scripts use the `dataset` and `model` entries selected below. Pick others per run with
+#   python main.py --dataset gyafc_fr --model marian_es_en --save_dir ckpt/...
+# and point to a different config file with --config.
+#
+# Any key in an entry is used as the default for the script argument of the same name
+# (task, data_dir, model_string, model_path, lr, batch_size, ...). Arguments given on the
+# command line always win, and keys a script doesn't have an argument for are ignored.
+#
+# NOTE: the predictor is trained on the tokenizer of `model_string`, so train it (main.py)
+# with the same model you then generate with (predict_*/evaluate_*).
+
+dataset: gyafc_em
+model: marian_es_en
+
+datasets:
+  gyafc_em:
+    task: formality
+    data_dir: train_data/GYAFC_Corpus/Entertainment_Music
+  gyafc_fr:
+    task: formality
+    data_dir: train_data/GYAFC_Corpus/Family_Relationships
+  topic:
+    task: topic
+    data_dir: train_data/gpt2_generations
+    glove_file: train_data/glove.840B.300d.txt
+  iambic:
+    task: iambic
+    data_dir: train_data/gpt2_generations
+  rhyme:
+    task: rhyme
+    data_dir: train_data/gpt2_generations
+  newline:
+    task: newline
+    data_dir: train_data/gpt2_generations
+
+models:
+  marian_es_en:
+    model_string: Helsinki-NLP/opus-mt-es-en
+  marian_es_en_fisher: # Marian finetuned on Fisher (evaluate_formality.py)
+    model_string: Helsinki-NLP/opus-mt-es-en
+    model_path: ckpt/formality/marian_finetune_fisher
+  gpt2_medium:
+    model_string: openai-community/gpt2-medium
+  gpt2_large:
+    model_string: openai-community/gpt2-large

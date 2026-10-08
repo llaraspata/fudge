@@ -137,3 +137,9 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+
+# Downloaded by setup.sh
+large_files.zip
+ckpt/
+train_data/
+topic_human_evals/

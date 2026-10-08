@@ -10,6 +10,7 @@ from transformers import AutoTokenizer, AutoModelWithLMHead, AutoModelForSequenc
 
 from poetry_util import is_iambic, perfect_rhyme_end, count_syllables
 from constants import *
+from lm import resolve_model_string
 
 
 def conditional_perplexity(prefix, pred, tokenizer, model, device='cuda', sep_losses=False):
@@ -99,30 +100,30 @@ if __name__=='__main__':
 
     print('distinctness', distinctness(preds))
 
-    grammar_tokenizer = AutoTokenizer.from_pretrained('textattack/roberta-base-CoLA')
-    grammar_model = AutoModelForSequenceClassification.from_pretrained('textattack/roberta-base-CoLA').to(args.device)
+    grammar_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('textattack/roberta-base-CoLA'))
+    grammar_model = AutoModelForSequenceClassification.from_pretrained(resolve_model_string('textattack/roberta-base-CoLA')).to(args.device)
     grammar_model.eval()
     print('grammaticality', grammaticality(preds, grammar_tokenizer, grammar_model, device=args.device))
 
     perplexities = []
-    eval_tokenizer = AutoTokenizer.from_pretrained('transfo-xl-wt103')
-    eval_model = AutoModelWithLMHead.from_pretrained('transfo-xl-wt103').to(args.device)
+    eval_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('transfo-xl/transfo-xl-wt103'))
+    eval_model = AutoModelWithLMHead.from_pretrained(resolve_model_string('transfo-xl/transfo-xl-wt103')).to(args.device)
     eval_model.eval()
     for prefix, pred in zip(prefixes, preds):
         perplexities.append(conditional_perplexity(prefix, pred, eval_tokenizer, eval_model, device=args.device, sep_losses=True))
     print('transformer xl perplexity', np.mean(perplexities), '+/-', np.std(perplexities))
 
     perplexities = []
-    eval_tokenizer = AutoTokenizer.from_pretrained('openai-gpt')
-    eval_model = AutoModelWithLMHead.from_pretrained('openai-gpt').to(args.device)
+    eval_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('openai-community/openai-gpt'))
+    eval_model = AutoModelWithLMHead.from_pretrained(resolve_model_string('openai-community/openai-gpt')).to(args.device)
     eval_model.eval()
     for prefix, pred in zip(prefixes, preds):
         perplexities.append(conditional_perplexity(prefix, pred, eval_tokenizer, eval_model, device=args.device))
     print('gpt perplexity', np.mean(perplexities), '+/-', np.std(perplexities))
 
     # NOTE: uncomment this section with the path to the Shakespeare-finetuned GPT to evaluate this metric. it's in ckpt/poetry/gpt_finetune_shakespeare.pth.tar. 
-    # eval_tokenizer = AutoTokenizer.from_pretrained('openai-gpt')
-    # eval_model = AutoModelWithLMHead.from_pretrained('openai-gpt').to(args.device)
+    # eval_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('openai-community/openai-gpt'))
+    # eval_model = AutoModelWithLMHead.from_pretrained(resolve_model_string('openai-community/openai-gpt')).to(args.device)
     # checkpoint = torch.load('***PATH_TO_SHAKESPEARE_FINETUNED_GPT***', map_location=args.device)
     # mod_dict = {}
     # for key in checkpoint['state_dict']:

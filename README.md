@@ -12,6 +12,33 @@ We tested on Python 3.8.5 but earlier versions of Python 3 are almost certainly 
 pip install -r requirements.txt
 ```
 
+**Quick setup.** `./setup.sh` does all of the below: it creates the Python 3.8 venv, downloads the HuggingFace models into the HuggingFace cache (`$HF_HUB_CACHE`, or `$HF_HOME/hub`, default `~/.cache/huggingface/hub`; transformers 3.4 can no longer download them itself, and `lm.py` picks them up from there), and downloads and extracts the checkpoints and training data. Run `./setup.sh --help` for options.
+
+**Python version.** The pinned packages need **Python 3.8**: `torch==1.7.0` has no wheels for Python 3.9+, and `transformers==3.4.0` / `tokenizers==0.9.2` don't build on recent Python. On newer systems (e.g. Ubuntu 24.04 with Python 3.12, where a bare `pip install` also fails with `externally-managed-environment`), create a Python 3.8 virtual environment instead. With [uv](https://docs.astral.sh/uv/):
+
+```
+uv venv --python 3.8 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+uv pip install --python .venv/bin/python "protobuf==3.20.3"
+source .venv/bin/activate
+```
+
+The `protobuf` pin is needed because `pytorch-lightning` pulls in `tensorboard`, which otherwise installs protobuf 5.x and makes `import pytorch_lightning` fail with a "Descriptors cannot be created directly" error.
+
+**Recent GPUs (Ampere / Ada, e.g. RTX 30xx/40xx, A100).** `torch==1.7.0` is built for CUDA 10.2 and fails on these cards with `CUDA error: no kernel image is available for execution on the device`. Replace it with a CUDA 11.7 build, which works with the other pinned packages:
+
+```
+uv pip install --python .venv/bin/python "torch==1.13.1+cu117" \
+    --index-url https://download.pytorch.org/whl/cu117 \
+    --extra-index-url https://pypi.org/simple --index-strategy unsafe-best-match
+```
+
+To check the install:
+
+```
+python -c "import torch, transformers, pytorch_lightning; print(torch.__version__, torch.cuda.is_available()); print(torch.ones(2).cuda().sum())"
+```
+
 Additionally, to get our pre-trained predictor checkpoints and training data, run:
 
 ```

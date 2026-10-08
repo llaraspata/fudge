@@ -16,15 +16,13 @@ from data import Dataset
 from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params
 from constants import *
+from lm import load_tokenizer, load_tokenizer_and_lm
+from config import parse_args_with_config
 
 def main(args):
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
-    tokenizer = MarianTokenizer.from_pretrained(args.model_string)
-    tokenizer.add_special_tokens({'pad_token': PAD_TOKEN})
-    pad_id = tokenizer.encode(PAD_TOKEN)[0]
-    model = MarianMTModel.from_pretrained(args.model_string, return_dict=True).to(args.device)
-    model.eval()
+    tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, return_dict=True)
 
     checkpoint = torch.load(args.ckpt, map_location=args.device)
     model_args = checkpoint['args']
@@ -59,22 +57,38 @@ def predict_formality(model, tokenizer, conditioning_model, input_text, dataset_
         encoded_input = [tokenizer.encode(it, return_tensors='pt').to(device) for it in input_text] # batch x seq
         encoded_input = torch.cat(encoded_input, dim=0)
 
-        input_ids = torch.LongTensor([[58100]]).to(device)
-        cur_len = 1
-        max_length = length_cutoff
         min_length = 0
         temperature = 1.0
         top_k = 50
         top_p = 1.0
         repetition_penalty = 1.0
         no_repeat_ngram_size = 0
-        bad_words_ids = [[58100]]
-        pad_token_id = 58100
-        eos_token_id = 0
         effective_batch_size = batch_size
-        attention_mask = encoded_input.new_ones(encoded_input.shape)
         use_cache = True
-        model_specific_kwargs = {'encoder_outputs': model.get_encoder()(encoded_input, attention_mask=attention_mask)}
+
+        if model.config.is_encoder_decoder: # e.g. marian: input is encoded once, decoder generates from the start token
+            start_token_id = model.config.decoder_start_token_id # 58100 for marian
+            input_ids = torch.LongTensor([[start_token_id]] * batch_size).to(device)
+            gen_start = 1 # generated text starts after the start token
+            max_length = length_cutoff
+            bad_words_ids = [[start_token_id]]
+            pad_token_id = start_token_id
+            eos_token_id = model.config.eos_token_id # 0 for marian
+            attention_mask = encoded_input.new_ones(encoded_input.shape)
+            model_specific_kwargs = {'encoder_outputs': model.get_encoder()(encoded_input, attention_mask=attention_mask)}
+        else: # decoder-only, e.g. gpt2: input is the prompt, generation continues it
+            input_ids = encoded_input
+            gen_start = input_ids.shape[1] # generated text starts after the prompt
+            max_length = gen_start + length_cutoff
+            max_positions = getattr(model.config, 'max_position_embeddings', None)
+            if max_positions is not None:
+                max_length = min(max_length, max_positions)
+            bad_words_ids = None # PAD_TOKEN was added to the tokenizer only, the lm can't produce it
+            eos_token_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else model.config.eos_token_id
+            pad_token_id = model.config.pad_token_id if model.config.pad_token_id is not None else eos_token_id
+            attention_mask = input_ids.new_ones(input_ids.shape)
+            model_specific_kwargs = {}
+        cur_len = input_ids.shape[1]
 
         output = _generate_no_beam_search(model,
                                         conditioning_model,
@@ -96,9 +110,12 @@ def predict_formality(model, tokenizer, conditioning_model, input_text, dataset_
                                         batch_size,
                                         attention_mask,
                                         use_cache,
+                                        gen_start,
                                         model_specific_kwargs)
 
-        return [tokenizer.decode(s[1:]) for s in output] # 1: to delete the pad token
+        if model.config.is_encoder_decoder:
+            return [tokenizer.decode(s[gen_start:]) for s in output] # to delete the pad token
+        return [tokenizer.decode(s[gen_start:], skip_special_tokens=True) for s in output] # only the continuation, without eos/padding
 
 
 # hack of code from transformers/generation_utils.py
@@ -124,10 +141,12 @@ def _generate_no_beam_search(
         batch_size,
         attention_mask,
         use_cache,
+        gen_start,
         model_kwargs,
     ):
         """Generate sequences for each example without beam search (num_beams == 1).
         All returned sequence are generated independantly.
+        gen_start: index in input_ids where the generated text starts; the conditioning model only sees tokens from there on.
         """
         # length of generated sentences / unfinished sentences
         unfinished_sents = input_ids.new(batch_size).fill_(1)
@@ -163,8 +182,8 @@ def _generate_no_beam_search(
                 past = outputs.mems
 
             top_logits, top_indices = scores.topk(precondition_topk, dim=1) # batch x topk
-            tplus1_candidates = torch.cat([input_ids.unsqueeze(1).expand(-1, precondition_topk, -1), top_indices.unsqueeze(2)], dim=2)[:, :, 1:] # batch x topk x seq+1, with pad dropped
-            expanded_lengths = torch.LongTensor([[cur_len for _ in range(precondition_topk)] for _ in range(batch_size)]).to(scores.device)
+            tplus1_candidates = torch.cat([input_ids.unsqueeze(1).expand(-1, precondition_topk, -1), top_indices.unsqueeze(2)], dim=2)[:, :, gen_start:] # batch x topk x seq+1, with start token / prompt dropped
+            expanded_lengths = torch.LongTensor([[cur_len + 1 - gen_start for _ in range(precondition_topk)] for _ in range(batch_size)]).to(scores.device)
             if condition_lambda == 0:
                 condition_logits = torch.zeros_like(top_logits).float()
             else:
@@ -246,7 +265,7 @@ if __name__=='__main__':
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
     parser.add_argument('--debug', action='store_true', default=False)
 
-    args = parser.parse_args()
+    args = parse_args_with_config(parser)
 
     random.seed(args.seed)
     np.random.seed(args.seed)

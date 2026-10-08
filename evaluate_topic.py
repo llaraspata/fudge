@@ -20,16 +20,13 @@ from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, pad_mask
 from predict_topic import predict
 from constants import *
+from lm import load_tokenizer, load_tokenizer_and_lm
 
 
 def main(args):
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
-    gpt_tokenizer = AutoTokenizer.from_pretrained(args.model_string)
-    gpt_tokenizer.add_special_tokens({'pad_token': PAD_TOKEN})
-    gpt_pad_id = gpt_tokenizer.encode(PAD_TOKEN)[0]
-    gpt_model = AutoModelWithLMHead.from_pretrained(args.model_string).to(args.device)
-    gpt_model.eval()
+    gpt_tokenizer, gpt_pad_id, gpt_model = load_tokenizer_and_lm(args.model_string, device=args.device)
 
     checkpoint = torch.load(args.ckpt, map_location=args.device)
     model_args = checkpoint['args']
@@ -113,7 +110,7 @@ if __name__=='__main__':
     parser.add_argument('--ckpt', type=str, required=True)
     parser.add_argument('--log_file', type=str, required=True, help='file to write outputs to (csv format)')
     parser.add_argument('--dataset_info', type=str, required=True, help='saved dataset info')
-    parser.add_argument('--model_string', type=str, default='gpt2-medium')
+    parser.add_argument('--model_string', type=str, default='openai-community/gpt2-medium')
 
     parser.add_argument('--condition_file', type=str, default=None, help='file of inputs and conditions')
     parser.add_argument('--prefix_file', type=str, default=None, help='prefix set')

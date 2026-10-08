@@ -18,17 +18,14 @@ from data import Dataset, load_rhyme_info
 from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params
 from constants import *
+from lm import load_tokenizer, load_tokenizer_and_lm
 from poetry_util import get_rhymes, count_syllables
 from predict_poetry import predict_couplet
 
 def main(args):
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
-    gpt_tokenizer = AutoTokenizer.from_pretrained(args.model_string)
-    gpt_tokenizer.add_special_tokens({'pad_token': PAD_TOKEN})
-    gpt_pad_id = gpt_tokenizer.encode(PAD_TOKEN)[0]
-    gpt_model = AutoModelWithLMHead.from_pretrained(args.model_string).to(args.device)
-    gpt_model.eval()
+    gpt_tokenizer, gpt_pad_id, gpt_model = load_tokenizer_and_lm(args.model_string, device=args.device)
 
     checkpoint = torch.load(args.iambic_ckpt, map_location=args.device)
     model_args = checkpoint['args']
@@ -93,7 +90,7 @@ if __name__=='__main__':
     parser.add_argument('--newline_ckpt', type=str, required=True)
     parser.add_argument('--dataset_info', type=str, required=True, help='saved dataset info')
     parser.add_argument('--rhyme_info', type=str, required=True, help='saved rhyme info')
-    parser.add_argument('--model_string', type=str, default='gpt2-medium')
+    parser.add_argument('--model_string', type=str, default='openai-community/gpt2-medium')
 
     parser.add_argument('--prefix_file', type=str, default=None, required=True, help='file of prefix lines for couplets')
 

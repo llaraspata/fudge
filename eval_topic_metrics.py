@@ -20,6 +20,7 @@ from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, pad_mask
 from predict import predict
 from constants import *
+from lm import resolve_model_string
 
 def tw_topic_eval(sentences, category, tw_dir, cap=None):
     # num matches of distinct words
@@ -118,17 +119,17 @@ if __name__=='__main__':
     print('Overall avg distinctness:', dist_overall)
     print('per category:', dist_info_by_category)
 
-    grammar_tokenizer = AutoTokenizer.from_pretrained('textattack/roberta-base-CoLA')
-    grammar_model = AutoModelForSequenceClassification.from_pretrained('textattack/roberta-base-CoLA').to(args.device)
+    grammar_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('textattack/roberta-base-CoLA'))
+    grammar_model = AutoModelForSequenceClassification.from_pretrained(resolve_model_string('textattack/roberta-base-CoLA')).to(args.device)
     grammar_model.eval()
     print('grammaticality:', grammaticality(all_c_sents, grammar_tokenizer, grammar_model, device=args.device))
 
-    eval_tokenizer = AutoTokenizer.from_pretrained('openai-gpt')
-    eval_model = AutoModelWithLMHead.from_pretrained('openai-gpt').to(args.device)
+    eval_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('openai-community/openai-gpt'))
+    eval_model = AutoModelWithLMHead.from_pretrained(resolve_model_string('openai-community/openai-gpt')).to(args.device)
     eval_model.eval()
     print('GPT perplexity:', perplexity(all_c_sents, eval_tokenizer, eval_model))
 
-    eval_tokenizer = AutoTokenizer.from_pretrained('transfo-xl-wt103')
-    eval_model = AutoModelWithLMHead.from_pretrained('transfo-xl-wt103').to(args.device)
+    eval_tokenizer = AutoTokenizer.from_pretrained(resolve_model_string('transfo-xl/transfo-xl-wt103'))
+    eval_model = AutoModelWithLMHead.from_pretrained(resolve_model_string('transfo-xl/transfo-xl-wt103')).to(args.device)
     eval_model.eval()
     print('TFXL perplexity:', perplexity(all_c_sents, eval_tokenizer, eval_model))

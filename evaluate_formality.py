@@ -17,32 +17,16 @@ from data import Dataset
 from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params
 from constants import *
+from lm import load_tokenizer, load_tokenizer_and_lm
+from config import parse_args_with_config
 from predict_formality import predict_formality
+
 
 def main(args):
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
-    tokenizer = MarianTokenizer.from_pretrained(args.model_string)
-    tokenizer.add_special_tokens({'pad_token': PAD_TOKEN})
-    pad_id = tokenizer.encode(PAD_TOKEN)[0]
-    model = MarianMTModel.from_pretrained(args.model_string, return_dict=True).to(args.device)
-    if args.model_path is not None:
-        if os.path.isdir(args.model_path):
-            for _, _, files in os.walk(args.model_path):
-                for fname in files:
-                    if fname.endswith('.ckpt'):
-                        args.model_path = os.path.join(args.model_path, fname)
-                        break
-        ckpt = torch.load(args.model_path)
-        try:
-            model.load_state_dict(ckpt['state_dict'])
-        except:
-            state_dict = {}
-            for key in ckpt['state_dict'].keys():
-                assert key.startswith('model.')
-                state_dict[key[6:]] = ckpt['state_dict'][key]
-            model.load_state_dict(state_dict)
-    model.eval()
+
+    tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, model_path=args.model_path, return_dict=True)
 
     checkpoint = torch.load(args.ckpt, map_location=args.device)
     model_args = checkpoint['args']
@@ -50,6 +34,7 @@ def main(args):
     conditioning_model.load_state_dict(checkpoint['state_dict'])
     conditioning_model = conditioning_model.to(args.device)
     conditioning_model.eval()
+
     if args.verbose:
         print("=> loaded checkpoint '{}' (epoch {})"
                 .format(args.ckpt, checkpoint['epoch']))
@@ -95,7 +80,7 @@ if __name__=='__main__':
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--verbose', action='store_true', default=False)
 
-    args = parser.parse_args()
+    args = parse_args_with_config(parser)
 
     random.seed(args.seed)
     np.random.seed(args.seed)

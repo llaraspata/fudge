@@ -2,7 +2,7 @@ PAD_TOKEN = '[PAD]'
 EOT_TOKEN = '<|endoftext|>'
 SEP = 50256 # just use the weird eot token
 
-TOPIC_MODEL_STRING = 'gpt2-medium'
+TOPIC_MODEL_STRING = 'openai-community/gpt2-medium'
 FORMALITY_MODEL_STRING = 'Helsinki-NLP/opus-mt-es-en'
 
 DIR_END_SPLIT_POSITIONS = 32
