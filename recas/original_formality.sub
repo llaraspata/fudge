@@ -1,0 +1,16 @@
+universe = vanilla
+request_cpus = 8
+request_gpus = 1
+request_memory = 48 GB
+
+initialdir = /lustrehome/llaraspata/fudge
+getenv = True
+
+executable = setup.sh
+
+output = logs/setup-out.log
+error  = logs/setup-err.log
+log    = logs/setup-log.log
+
+arguments = "ckpt/formality/predictor_gyafc_entertainment_music/model.pth.tar ckpt/formality/predictor_gyafc_entertainment_music/dataset_info formality_data/fisher_test_oracle.es marian_es_en_fisher original_formal_preds.log formality_data/test.noid.cleaned_0 formality_data/test.noid.cleaned_1 ckpt/formality/test_evaluator_gyafc_family_relationships/model.pth.tar ckpt/formality/test_evaluator_gyafc_family_relationships/dataset_info original_formal_metrics.log"
+queue
