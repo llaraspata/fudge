@@ -6,7 +6,7 @@ request_memory = 48 GB
 initialdir = /lustrehome/llaraspata/fudge
 getenv = True
 
-executable = setup-recas.sh
+executable = setup.sh
 
 output = logs/setup-out.log
 error  = logs/setup-err.log
