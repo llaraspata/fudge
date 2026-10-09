@@ -143,3 +143,4 @@ large_files.zip
 ckpt/
 train_data/
 topic_human_evals/
+logs/
