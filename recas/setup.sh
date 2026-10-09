@@ -9,9 +9,9 @@
 #
 # Environment variables:
 #   VENV_DIR      where to create the venv (default: .venv)
-#   TORCH_SPEC    torch to install over the pinned 1.7.0 (default: torch==1.13.1+cu117, needed for Ampere/Ada GPUs);
-#                 set it to empty to keep torch==1.7.0
-#   TORCH_INDEX   index for TORCH_SPEC (default: https://download.pytorch.org/whl/cu117)
+#   TORCH_SPEC    torch to install over the pinned 1.7.0 (default: torch==2.4.1, built for Ampere/Ada/Hopper GPUs up to sm_90;
+#                 it is the last release for python 3.8); set it to empty to keep torch==1.7.0
+#   TORCH_INDEX   index for TORCH_SPEC (default: https://download.pytorch.org/whl/cu121)
 #   HF_HOME       huggingface root dir; models go to $HF_HOME/hub (default: ~/.cache/huggingface/hub)
 #   HF_HUB_CACHE  huggingface model cache, overrides $HF_HOME/hub. lm.py reads models from the same place,
 #                 so set the same value when running the scripts
@@ -23,8 +23,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 VENV_DIR="${VENV_DIR:-.venv}"
-TORCH_SPEC="${TORCH_SPEC-torch==1.13.1+cu117}"
-TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu117}"
+TORCH_SPEC="${TORCH_SPEC-torch==2.4.1}"
+TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu121}"
 DATA_URL="https://naacl2021-fudge-files.s3.amazonaws.com/large_files.zip"
 
 DO_VENV=1; DO_MODELS=1; DO_DATA=1
