@@ -28,7 +28,7 @@ def main(args):
 
     tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, model_path=args.model_path, return_dict=True)
 
-    checkpoint = torch.load(args.ckpt, map_location=args.device)
+    checkpoint = torch.load(args.ckpt, map_location='cpu')
     model_args = checkpoint['args']
     conditioning_model = Model(model_args, pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
     conditioning_model.load_state_dict(checkpoint['state_dict'])
