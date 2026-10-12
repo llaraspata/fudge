@@ -1,6 +1,6 @@
 import os
 # Must be set before torch initialises CUDA. Keeps the GPU HTCondor assigned to the job, else uses GPU 0
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "2")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 import random
 import time
 import pickle
@@ -17,6 +17,7 @@ from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, pad_mask
 from constants import *
 from config import parse_args_with_config
+from lm import load_checkpoint
 
 
 def train(model, dataset, optimizer, criterion, epoch, args, data_start_index):
@@ -123,7 +124,7 @@ def main(args):
             pickle.dump(dataset.rhyme_info, wf)
 
     if args.ckpt:
-        checkpoint = torch.load(args.ckpt, map_location=args.device)
+        checkpoint = load_checkpoint(args.ckpt, map_location=args.device)
         start_epoch = checkpoint['epoch'] + 1
         best_val_metric = checkpoint['best_metric']
 

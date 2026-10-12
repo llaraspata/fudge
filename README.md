@@ -200,6 +200,39 @@ This reports the average P(toxic) and the fraction of toxic generations accordin
 
 `recas/toxicity.sh` runs both steps: `recas/toxicity.sh <ckpt> <dataset_info> <prompts> <model entry> <preds out> <metrics out>`.
 
+## Newer LLM families (Llama 3.2, Gemma 4, Qwen2.5)
+
+The toxicity and formality tasks also run with these base models, which are entries of `config.yaml`:
+
+| family | entries |
+|---|---|
+| Meta Llama 3.2 | `llama32_1b`, `llama32_3b` |
+| Google Gemma 4 | `gemma4_e2b`, `gemma4_e4b` |
+| Qwen2.5 | `qwen25_0_5b`, `qwen25_1_5b`, `qwen25_3b` |
+
+They need a recent transformers, which doesn't work with the pinned stack above, so they get their own venv, `.venv-new` (Python 3.11, `requirements-new.txt`). `.venv` stays as is for everything else. The toxicity and formality code runs in both: with your existing GPT-2/Marian checkpoints it gives the same outputs in either venv.
+
+**Setup.** Llama and Gemma are gated: accept their license on their huggingface pages (each Llama release separately), then set `HF_TOKEN` or run `hf auth login`. Then:
+
+```
+recas/setup.sh --skip-venv --skip-data --new
+```
+
+creates `.venv-new` and downloads the models into the huggingface cache. Its torch is a CUDA 12.6 build (`NEW_TORCH_INDEX` to change it). The models load in bf16 (`dtype` in `config.yaml`). Gemma-4-E4B loads as the full multimodal model, ~16GB of weights, so it needs a ≥20GB GPU.
+
+**Running.** Use `.venv-new` and the same commands as above, with `--model <entry>`. `recas/toxicity.sh` and `recas/formality.sh` activate the venv set in the model entry (`venv:`) themselves. The predictor is trained on the base model's tokenizer, so train one per family, not per model: models of the same family share the tokenizer, so e.g. `llama32_1b` and `llama32_3b` can use the same predictor. For example, for toxicity:
+
+```
+source .venv-new/bin/activate
+python -u main.py --dataset rtp --model qwen25_0_5b --save_dir ckpt/toxicity/qwen25 --num_workers 20 --batch_size 32 --validation_freq 1 --lr 2e-5 --epochs 20 > toxicity_qwen25_predictor.log
+python -u evaluate_toxicity.py --dataset rtp --model qwen25_3b --ckpt ckpt/toxicity/qwen25/model_best.pth.tar --dataset_info ckpt/toxicity/qwen25/dataset_info --in_file train_data/RealToxicityPrompts/processed/test_prompts > toxicity_qwen25_3b_preds.log
+python eval_toxicity_metrics.py --pred toxicity_qwen25_3b_preds.log --prompts train_data/RealToxicityPrompts/processed/test_prompts --ckpt ckpt/toxicity/qwen25/model_best.pth.tar --dataset_info ckpt/toxicity/qwen25/dataset_info
+```
+
+The metrics scripts read the classifier's tokenizer from its checkpoint, so `--model_string` isn't needed there anymore.
+
+**Formality.** These are decoder-only models, not translation models, so `evaluate_formality.py` puts each Spanish input in a few-shot translation prompt (`FORMALITY_PROMPT_TEMPLATE` in `constants.py`, or `--prompt_template` with `{input}` where the input goes), and keeps the generation up to the first newline. The predictor still only sees the generated English. Train the formality predictor per family as above (`--dataset gyafc_em --model <entry>`). For `eval_formality_metrics.py`, keep the existing Marian-tokenized evaluator (`ckpt/formality/test_evaluator_gyafc_family_relationships`) to score every model's outputs with the same classifier.
+
 ## Running FUDGE on your own data
 
 The code has been refactored so that the iambic (poetry), rhyme (poetry), newline (poetry), future word (topic), formality (machine translation), and toxicity (RealToxicityPrompts) are controlled by the `--task` flag to `main.py`. You should add your task as another option here, then modify the data processing in `data.py` and the model in `model.py` as needed for your task. (In `data.py` you probably won't need all the entries of the tuple that is expected of the loader; you can just put dummy entries in the ones you don't need.) You might also need to modify the loss computation in the `train` and `validate` functions in `main.py`. You'll probably want to write new evaluation scripts, though the existing poetry/topic/formality ones are hopefully helpful as references. 

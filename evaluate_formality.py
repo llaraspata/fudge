@@ -11,13 +11,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModelWithLMHead, pipeline, set_seed, GPT2Tokenizer, GPT2Model, MarianTokenizer, MarianMTModel
 
 from data import Dataset
 from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, save_model_stats, ResourceTracker, default_stats_file
 from constants import *
-from lm import load_tokenizer, load_tokenizer_and_lm
+from lm import load_tokenizer, load_tokenizer_and_lm, load_checkpoint
 from config import parse_args_with_config
 from predict_formality import predict_formality
 
@@ -28,9 +27,9 @@ def main(args):
         with open(args.dataset_info, 'rb') as rf:
             dataset_info = pickle.load(rf)
 
-        tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, model_path=args.model_path, return_dict=True)
+        tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, model_path=args.model_path, dtype=args.dtype, return_dict=True)
 
-        checkpoint = torch.load(args.ckpt, map_location='cpu')
+        checkpoint = load_checkpoint(args.ckpt)
         model_args = checkpoint['args']
         conditioning_model = Model(model_args, pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
         conditioning_model.load_state_dict(checkpoint['state_dict'])
@@ -58,7 +57,9 @@ def main(args):
                             do_sample=args.do_sample,
                             length_cutoff=args.length_cutoff,
                             condition_lambda=args.condition_lambda,
-                            device=args.device)
+                            device=args.device,
+                            prompt_template=args.prompt_template,
+                            stop_at_newline=True)
             print(results[0])
 
     stats_file = args.stats_file or default_stats_file('formality', args.model or args.model_string)
@@ -74,6 +75,7 @@ if __name__=='__main__':
     parser.add_argument('--dataset_info', type=str, required=True, help='saved dataset info')
     parser.add_argument('--model_string', type=str, default='Helsinki-NLP/opus-mt-es-en')
     parser.add_argument('--model_path', type=str, default=None)
+    parser.add_argument('--dtype', type=str, default=None, choices=['float32', 'bfloat16', 'float16'], help='precision to load the lm in (default: fp32); bfloat16 for the larger llms, in .venv-new')
 
     parser.add_argument('--in_file', type=str, default=None, required=True, help='file containing text to run pred on')
     parser.add_argument('--stats_file', type=str, default=None, help='json file to save model statistics to (default: logs/model_stats/formality_<model>_<timestamp>.json)')
@@ -82,6 +84,7 @@ if __name__=='__main__':
     parser.add_argument('--do_sample', action='store_true', default=False, help='sample or greedy; only greedy implemented')
     parser.add_argument('--condition_lambda', type=float, default=1.0, help='lambda weight on conditioning model')
     parser.add_argument('--length_cutoff', type=int, default=512, help='max length')
+    parser.add_argument('--prompt_template', type=str, default=FORMALITY_PROMPT_TEMPLATE, help='decoder-only lms only: prompt the input is put in at {input}; generation stops at the first newline. Ignored for encoder-decoder lms (marian)')
 
     parser.add_argument('--seed', type=int, default=1, help='random seed')
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])

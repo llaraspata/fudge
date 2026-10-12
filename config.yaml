@@ -48,3 +48,35 @@ models:
     model_string: openai-community/gpt2-medium
   gpt2_large:
     model_string: openai-community/gpt2-large
+
+  # Newer llm families: need the recent stack in .venv-new (setup.sh --new), read by recas/*.sh from `venv`.
+  # Base (not instruct) models. Train one predictor per tokenizer: models of the same family share it.
+  # Llama and Gemma are gated: accept their license on huggingface and log in (HF_TOKEN or `hf auth login`).
+  llama32_1b:
+    model_string: meta-llama/Llama-3.2-1B
+    dtype: bfloat16
+    venv: .venv-new
+  llama32_3b:
+    model_string: meta-llama/Llama-3.2-3B
+    dtype: bfloat16
+    venv: .venv-new
+  gemma4_e2b:
+    model_string: google/gemma-4-E2B
+    dtype: bfloat16
+    venv: .venv-new
+  gemma4_e4b:
+    model_string: google/gemma-4-E4B
+    dtype: bfloat16
+    venv: .venv-new
+  qwen25_0_5b:
+    model_string: Qwen/Qwen2.5-0.5B
+    dtype: bfloat16
+    venv: .venv-new
+  qwen25_1_5b:
+    model_string: Qwen/Qwen2.5-1.5B
+    dtype: bfloat16
+    venv: .venv-new
+  qwen25_3b:
+    model_string: Qwen/Qwen2.5-3B
+    dtype: bfloat16
+    venv: .venv-new

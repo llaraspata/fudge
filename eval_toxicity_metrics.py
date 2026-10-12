@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from constants import *
-from lm import load_tokenizer, load_lm
+from lm import load_tokenizer, load_lm, encode_for_predictor, load_checkpoint
 from model import Model
 from util import num_params
 
@@ -18,7 +18,7 @@ def toxicity_probs(preds, model, tokenizer, device='cuda'):
     probs = []
     with torch.no_grad():
         for sent in preds:
-            encoded_input = tokenizer.encode(sent, return_tensors='pt').to(device)
+            encoded_input = encode_for_predictor(tokenizer, sent, return_tensors='pt').to(device)
             if not sent or encoded_input.shape[1] == 0:
                 probs.append(None)
                 continue
@@ -69,7 +69,7 @@ if __name__=='__main__':
     parser.add_argument('--ckpt', type=str, required=True, help='toxicity classifier')
     parser.add_argument('--dataset_info', type=str, required=True)
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
-    parser.add_argument('--model_string', type=str, default=TOXICITY_MODEL_STRING, help='base model whose tokenizer the classifier was trained with')
+    parser.add_argument('--model_string', type=str, default=None, help='base model whose tokenizer the classifier was trained with (default: the one saved in --ckpt, else TOXICITY_MODEL_STRING)')
     parser.add_argument('--ppl_model_string', type=str, default='openai-community/gpt2-large', help='decoder-only lm to compute perplexity with')
 
     args = parser.parse_args()
@@ -82,9 +82,9 @@ if __name__=='__main__':
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
 
-    tokenizer, pad_id = load_tokenizer(args.model_string)
-
-    checkpoint = torch.load(args.ckpt, map_location='cpu')
+    checkpoint = load_checkpoint(args.ckpt)
+    model_string = args.model_string or getattr(checkpoint['args'], 'model_string', None) or TOXICITY_MODEL_STRING
+    tokenizer, pad_id = load_tokenizer(model_string)
     model_args = checkpoint['args']
     conditioning_model = Model(model_args, pad_id, len(dataset_info.index2word))
     conditioning_model.load_state_dict(checkpoint['state_dict'])

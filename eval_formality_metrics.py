@@ -6,10 +6,9 @@ import math
 import sacrebleu
 import numpy as np
 import torch
-from transformers import AutoTokenizer, AutoModelWithLMHead, pipeline, set_seed, GPT2Tokenizer, GPT2Model, MarianTokenizer, MarianMTModel
 
 from constants import *
-from lm import load_tokenizer, load_tokenizer_and_lm
+from lm import load_tokenizer, encode_for_predictor, load_checkpoint
 from model import Model
 from util import save_checkpoint, ProgressMeter, AverageMeter, num_params
 
@@ -17,7 +16,7 @@ from util import save_checkpoint, ProgressMeter, AverageMeter, num_params
 def avg_formality(preds, model, tokenizer, device='cuda'):
     probs = []
     for sent in preds:
-        encoded_input = tokenizer.encode(sent, return_tensors='pt').to(device)
+        encoded_input = encode_for_predictor(tokenizer, sent, return_tensors='pt').to(device)
         lengths = torch.LongTensor([encoded_input.shape[1]]).to(device)
         scores = model(encoded_input, lengths=lengths) # batch x seq
         score = scores.flatten()[-1].item()
@@ -32,7 +31,7 @@ if __name__=='__main__':
     parser.add_argument('--ckpt', type=str, help='formality classifier')
     parser.add_argument('--dataset_info', type=str)
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
-    parser.add_argument('--model_string', type=str, default='Helsinki-NLP/opus-mt-es-en')
+    parser.add_argument('--model_string', type=str, default=None, help='base model whose tokenizer the classifier was trained with (default: the one saved in --ckpt, else FORMALITY_MODEL_STRING). Not the generating model\'s, if the classifier is a separate evaluator')
 
     args = parser.parse_args()
 
@@ -61,9 +60,9 @@ if __name__=='__main__':
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
 
-    tokenizer, pad_id = load_tokenizer(args.model_string)
-
-    checkpoint = torch.load(args.ckpt, map_location='cpu')
+    checkpoint = load_checkpoint(args.ckpt)
+    model_string = args.model_string or getattr(checkpoint['args'], 'model_string', None) or FORMALITY_MODEL_STRING
+    tokenizer, pad_id = load_tokenizer(model_string)
     model_args = checkpoint['args']
     conditioning_model = Model(model_args, pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
     conditioning_model.load_state_dict(checkpoint['state_dict'])

@@ -10,7 +10,7 @@ import torch.nn as nn
 from model import Model
 from util import num_params
 from constants import *
-from lm import load_tokenizer_and_lm
+from lm import load_tokenizer_and_lm, load_checkpoint
 from config import parse_args_with_config
 from predict_formality import predict_formality
 
@@ -18,9 +18,9 @@ from predict_formality import predict_formality
 def main(args):
     with open(args.dataset_info, 'rb') as rf:
         dataset_info = pickle.load(rf)
-    tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, return_dict=True)
+    tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, dtype=args.dtype, return_dict=True)
 
-    checkpoint = torch.load(args.ckpt, map_location=args.device)
+    checkpoint = load_checkpoint(args.ckpt, map_location=args.device)
     model_args = checkpoint['args']
     conditioning_model = Model(model_args, pad_id, len(dataset_info.index2word))
     conditioning_model.load_state_dict(checkpoint['state_dict'])
@@ -87,6 +87,7 @@ if __name__=='__main__':
     parser.add_argument('--ckpt', type=str, required=True)
     parser.add_argument('--dataset_info', type=str, required=True, help='saved dataset info')
     parser.add_argument('--model_string', type=str, default=TOXICITY_MODEL_STRING)
+    parser.add_argument('--dtype', type=str, default=None, choices=['float32', 'bfloat16', 'float16'], help='precision to load the lm in (default: fp32); bfloat16 for the larger llms, in .venv-new')
 
     parser.add_argument('--input_text', type=str, default=None, required=True, help='text to run pred on')
 

@@ -7,7 +7,6 @@ import string
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false' # turn off since we're using multiple threads for loading anyway
 
-from transformers import AutoTokenizer, AutoModelWithLMHead, pipeline, set_seed, GPT2Tokenizer, GPT2Model
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -15,7 +14,7 @@ import torch
 from util import suppress_stdout
 from poetry_util import is_iambic, count_syllables, get_rhymes, get_rhyme_group
 from constants import *
-from lm import load_tokenizer
+from lm import load_tokenizer, encode_for_predictor
 
 DatasetInfo = namedtuple('DatasetInfo', 
                 ['index2word', 'word2index', 'total_words', 'vocab', 'glove_embeddings'])
@@ -315,7 +314,7 @@ class SplitLoader(torch.utils.data.IterableDataset):
                 future_word_num_syllables, rhyme_group_index, syllables_to_go = -1, -1, -1
                 raw_sentence, classification_label = self.data[self.pos]
                 original_sentence = raw_sentence.split()
-                sentence = self.parent.tokenizer.encode(raw_sentence, return_tensors='pt')[0]
+                sentence = encode_for_predictor(self.parent.tokenizer, raw_sentence, return_tensors='pt')[0]
                 length = len(sentence)
                 min_sentence_length = MIN_SENTENCE_LENGTH
 
@@ -337,7 +336,7 @@ class SplitLoader(torch.utils.data.IterableDataset):
             elif self.parent.toxicity:
                 future_word_num_syllables, rhyme_group_index, syllables_to_go = -1, -1, -1
                 raw_sentence, classification_label = self.data[self.pos]
-                sentence = self.parent.tokenizer.encode(raw_sentence, return_tensors='pt')[0]
+                sentence = encode_for_predictor(self.parent.tokenizer, raw_sentence, return_tensors='pt')[0]
                 length = len(sentence)
 
                 if len(sentence) > MIN_SENTENCE_LENGTH:

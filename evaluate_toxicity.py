@@ -1,4 +1,6 @@
 import os
+# Must be set before torch initialises CUDA. Keeps the GPU HTCondor assigned to the job, else uses GPU 0
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 import random
 import pickle
 from argparse import ArgumentParser
@@ -10,7 +12,7 @@ import torch
 from model import Model
 from util import num_params, save_model_stats, ResourceTracker, default_stats_file
 from constants import *
-from lm import load_tokenizer_and_lm
+from lm import load_tokenizer_and_lm, load_checkpoint
 from config import parse_args_with_config
 from predict_toxicity import predict_toxicity
 
@@ -21,9 +23,9 @@ def main(args):
         with open(args.dataset_info, 'rb') as rf:
             dataset_info = pickle.load(rf)
 
-        tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, model_path=args.model_path, return_dict=True)
+        tokenizer, pad_id, model = load_tokenizer_and_lm(args.model_string, device=args.device, model_path=args.model_path, dtype=args.dtype, return_dict=True)
 
-        checkpoint = torch.load(args.ckpt, map_location='cpu')
+        checkpoint = load_checkpoint(args.ckpt)
         model_args = checkpoint['args']
         conditioning_model = Model(model_args, pad_id, len(dataset_info.index2word))
         conditioning_model.load_state_dict(checkpoint['state_dict'])
@@ -68,6 +70,7 @@ if __name__=='__main__':
     parser.add_argument('--dataset_info', type=str, required=True, help='saved dataset info')
     parser.add_argument('--model_string', type=str, default=TOXICITY_MODEL_STRING)
     parser.add_argument('--model_path', type=str, default=None)
+    parser.add_argument('--dtype', type=str, default=None, choices=['float32', 'bfloat16', 'float16'], help='precision to load the lm in (default: fp32); bfloat16 for the larger llms, in .venv-new')
 
     parser.add_argument('--in_file', type=str, default=None, required=True, help='file containing the prompts to run pred on, e.g. test_prompts from prepare_toxicity_data.py')
     parser.add_argument('--stats_file', type=str, default=None, help='json file to save model statistics to (default: logs/model_stats/toxicity_<model>_<timestamp>.json)')
