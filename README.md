@@ -149,9 +149,60 @@ python -u main.py --task formality --data_dir train_data/GYAFC_Corpus/Entertainm
 
 The same evaluation commands as before will work; just modify the paths in the command to point to `model_best.pth.tar`, `dataset_info`, and `rhyme_info` from your newly trained ckpt folders. 
 
+## Toxicity (RealToxicityPrompts)
+
+Steer generation away from (or towards) toxic text, using the RealToxicityPrompts dataset (https://huggingface.co/datasets/allenai/real-toxicity-prompts) both to train the predictor and as test prompts. This task is not part of the original paper and has no pre-trained checkpoint, so you need to train the predictor first.
+
+### Data
+
+Download the dataset:
+
+```
+mkdir -p train_data/RealToxicityPrompts
+wget -O train_data/RealToxicityPrompts/prompts.jsonl https://huggingface.co/datasets/allenai/real-toxicity-prompts/resolve/main/prompts.jsonl
+```
+
+Then preprocess it:
+
+```
+python prepare_toxicity_data.py --in_file train_data/RealToxicityPrompts/prompts.jsonl --out_dir train_data/RealToxicityPrompts/processed
+```
+
+Each record's prompt and continuation become one example each, labeled toxic if its Perspective API toxicity score is >= 0.5 (`--threshold`); texts without a score are skipped. Records are shuffled and split 70/10/20 into train/val/test by record, so a prompt and its continuation always end up in the same split. This writes `{train,val,test}/{toxic,nontoxic}` (one text per line) and `test_prompts`, the test prompts to generate from. Use `--fields continuation` to train on continuations only.
+
+### Training your own predictors
+
+The predictor is trained on the tokenizer of the base model you will generate with, so train one per base model (`--model` is an entry of `config.yaml`; `rtp` is the dataset entry pointing to the data above):
+
+```
+python -u main.py --dataset rtp --model gpt2_medium --save_dir ckpt/toxicity/gpt2_medium --num_workers 20 --batch_size 32 --validation_freq 1 --lr 2e-5 --epochs 20 > toxicity_gpt2_medium_predictor.log
+```
+
+Use e.g. `--model marian_es_en` for the Marian model. As for formality, the predictor learns P(toxic) on all prefixes of each text at once.
+
+### Evaluation
+
+To generate outputs (one continuation per line, 20 tokens by default), run:
+
+```
+python -u evaluate_toxicity.py --dataset rtp --model gpt2_medium --ckpt ckpt/toxicity/gpt2_medium/model_best.pth.tar --dataset_info ckpt/toxicity/gpt2_medium/dataset_info --in_file train_data/RealToxicityPrompts/processed/test_prompts > toxicity_preds.log
+```
+
+Generation steers towards non-toxic text by default; pass `--target toxic` to steer the other way, and `--condition_lambda` to change how strongly. With a decoder-only model (GPT-2) the generations continue the prompts; with an encoder-decoder one (Marian) the prompts are the source text. Note that Marian is a Spanish-English translation model, so on the English RealToxicityPrompts prompts it mostly copies its input. The test split is ~20k prompts and generation is one prompt at a time, so you may want to evaluate on a subset (e.g. `head -1000` of `test_prompts`).
+
+Then evaluate metrics using:
+
+```
+python eval_toxicity_metrics.py --pred toxicity_preds.log --prompts train_data/RealToxicityPrompts/processed/test_prompts --ckpt ckpt/toxicity/gpt2_medium/model_best.pth.tar --dataset_info ckpt/toxicity/gpt2_medium/dataset_info --model_string openai-community/gpt2-medium
+```
+
+This reports the average P(toxic) and the fraction of toxic generations according to the predictor, distinct-1/2/3, and (with `--prompts`) the perplexity of the continuations given their prompts under GPT-2 large (`--ppl_model_string`). `--model_string` must be the base model the predictor was trained with. Since the predictor scoring the generations is the one used to steer them, these toxicity numbers are optimistic; for results comparable with the literature, also score the generations with an independent classifier such as the Perspective API.
+
+`recas/toxicity.sh` runs both steps: `recas/toxicity.sh <ckpt> <dataset_info> <prompts> <model entry> <preds out> <metrics out>`.
+
 ## Running FUDGE on your own data
 
-The code has been refactored so that the iambic (poetry), rhyme (poetry), newline (poetry), future word (topic), and formality (machine translation) are controlled by the `--task` flag to `main.py`. You should add your task as another option here, then modify the data processing in `data.py` and the model in `model.py` as needed for your task. (In `data.py` you probably won't need all the entries of the tuple that is expected of the loader; you can just put dummy entries in the ones you don't need.) You might also need to modify the loss computation in the `train` and `validate` functions in `main.py`. You'll probably want to write new evaluation scripts, though the existing poetry/topic/formality ones are hopefully helpful as references. 
+The code has been refactored so that the iambic (poetry), rhyme (poetry), newline (poetry), future word (topic), formality (machine translation), and toxicity (RealToxicityPrompts) are controlled by the `--task` flag to `main.py`. You should add your task as another option here, then modify the data processing in `data.py` and the model in `model.py` as needed for your task. (In `data.py` you probably won't need all the entries of the tuple that is expected of the loader; you can just put dummy entries in the ones you don't need.) You might also need to modify the loss computation in the `train` and `validate` functions in `main.py`. You'll probably want to write new evaluation scripts, though the existing poetry/topic/formality ones are hopefully helpful as references. 
 
 Alternatively, the general FUDGE framework is pretty simple, so you could always try reimplementing things yourself. HuggingFace recently added the `logits_warper` option to their generation utils (https://huggingface.co/docs/transformers/main_classes/text_generation#transformers.generation_utils.GenerationMixin.sample.logits_warper) which could be a good way to go if you're using one of their models as the base model, although I haven't tried it yet myself. A few additional details based on questions I've received: 
 
