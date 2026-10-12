@@ -4,6 +4,7 @@ SEP = 50256 # just use the weird eot token
 
 TOPIC_MODEL_STRING = 'openai-community/gpt2-medium'
 FORMALITY_MODEL_STRING = 'Helsinki-NLP/opus-mt-es-en'
+TOXICITY_MODEL_STRING = 'openai-community/gpt2-medium'
 
 DIR_END_SPLIT_POSITIONS = 32
 
@@ -12,6 +13,8 @@ FORMALITY_VAL_SIZE = 2000
 VOCAB_SIZE = 50000
 
 FORMALITY_MAX_LEN = 200
+TOXICITY_MAX_LEN = 200
+TOXICITY_THRESHOLD = 0.5 # perspective api score at or above which a text counts as toxic
 
 GLOVE_PRINT_PROGRESS_FREQ = 1000000
 GLOVE_DIM = 300

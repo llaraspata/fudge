@@ -21,6 +21,9 @@ datasets:
   gyafc_fr:
     task: formality
     data_dir: train_data/GYAFC_Corpus/Family_Relationships
+  rtp: # made by prepare_toxicity_data.py from RealToxicityPrompts prompts.jsonl
+    task: toxicity
+    data_dir: train_data/RealToxicityPrompts/processed
   topic:
     task: topic
     data_dir: train_data/gpt2_generations

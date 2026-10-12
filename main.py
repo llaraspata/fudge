@@ -1,4 +1,6 @@
 import os
+# Must be set before torch initialises CUDA. Keeps the GPU HTCondor assigned to the job, else uses GPU 0
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "2")
 import random
 import time
 import pickle
@@ -38,13 +40,13 @@ def train(model, dataset, optimizer, criterion, epoch, args, data_start_index):
         batch = [tensor.to(args.device) for tensor in batch]
         inputs, lengths, future_words, log_probs, labels, classification_targets, syllables_to_go, future_word_num_syllables, rhyme_group_index = batch
         
-        if args.task not in ['formality', 'iambic']:
+        if args.task not in ['formality', 'toxicity', 'iambic']:
             if not args.debug and len(inputs) != args.batch_size: # it'll screw up the bias...?
                 continue
         
         scores = model(inputs, lengths, future_words, log_probs, syllables_to_go, future_word_num_syllables, rhyme_group_index, run_classifier=True)
         
-        if args.task == 'formality': # we're learning for all positions at once. scores are batch x seq
+        if args.task in ['formality', 'toxicity']: # we're learning for all positions at once. scores are batch x seq
             expanded_labels = classification_targets.unsqueeze(1).expand(-1, scores.shape[1]) # batch x seq
             length_mask = pad_mask(lengths).permute(1, 0) # batch x seq
             loss = criterion(scores.flatten()[length_mask.flatten()==1], expanded_labels.flatten().float()[length_mask.flatten()==1])
@@ -81,13 +83,13 @@ def validate(model, dataset, criterion, epoch, args):
             batch = [tensor.to(args.device) for tensor in batch]
             inputs, lengths, future_words, log_probs, labels, classification_targets, syllables_to_go, future_word_num_syllables, rhyme_group_index = batch
     
-            if args.task not in ['formality', 'iambic']: # topic predictor
+            if args.task not in ['formality', 'toxicity', 'iambic']: # topic predictor
                 if not args.debug and len(inputs) != args.batch_size:
                     continue
     
             scores = model(inputs, lengths, future_words, log_probs, syllables_to_go, future_word_num_syllables, rhyme_group_index, run_classifier=True)
     
-            if args.task == 'formality': # we're learning for all positions at once. scores are batch x seq
+            if args.task in ['formality', 'toxicity']: # we're learning for all positions at once. scores are batch x seq
                 expanded_labels = classification_targets.unsqueeze(1).expand(-1, scores.shape[1]) # batch x seq
                 length_mask = pad_mask(lengths).permute(1, 0) # batch x seq
                 loss = criterion(scores.flatten()[length_mask.flatten()==1], expanded_labels.flatten().float()[length_mask.flatten()==1])
@@ -195,10 +197,10 @@ if __name__=='__main__':
     parser = ArgumentParser()
 
     # DATA
-    parser.add_argument('--task', type=str, required=True, choices=['iambic', 'rhyme', 'newline', 'topic', 'formality'])
+    parser.add_argument('--task', type=str, required=True, choices=['iambic', 'rhyme', 'newline', 'topic', 'formality', 'toxicity'])
     parser.add_argument('--data_dir', type=str, required=True)
     parser.add_argument('--glove_file', type=str, help='glove embedding init, for topic task')
-    parser.add_argument('--model_string', type=str, default=None, help='base model whose tokenizer the predictor uses (default: TOPIC/FORMALITY_MODEL_STRING in constants.py)')
+    parser.add_argument('--model_string', type=str, default=None, help='base model whose tokenizer the predictor uses (default: TOPIC/FORMALITY/TOXICITY_MODEL_STRING in constants.py)')
 
     # SAVE/LOAD
     parser.add_argument('--save_dir', type=str, required=True, help='where to save ckpts')

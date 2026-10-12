@@ -94,11 +94,15 @@ class Dataset:
         self.data_dir = args.data_dir
         self.topic = args.task == 'topic'
         self.formality = args.task == 'formality'
+        self.toxicity = args.task == 'toxicity'
         self.iambic = args.task == 'iambic'
         self.rhyme = args.task == 'rhyme'
         self.newline = args.task == 'newline'
 
-        model_string = getattr(args, 'model_string', None) or (FORMALITY_MODEL_STRING if self.formality else TOPIC_MODEL_STRING)
+        if self.toxicity:
+            model_string = getattr(args, 'model_string', None) or TOXICITY_MODEL_STRING
+        else:
+            model_string = getattr(args, 'model_string', None) or (FORMALITY_MODEL_STRING if self.formality else TOPIC_MODEL_STRING)
         self.tokenizer, self.gpt_pad_id = load_tokenizer(model_string)
     
         sentences = []
@@ -127,6 +131,20 @@ class Dataset:
 
             self.splits = {}
             self.splits['train'], self.splits['val'], self.splits['test'] = train, val, test
+
+        elif self.toxicity: # data_dir/{train,val,test}/{toxic,nontoxic}, made by prepare_toxicity_data.py
+            self.vocab['placeholder'] = 1 # anything so we don't crash
+            self.splits = {}
+
+            for split in ['train', 'val', 'test']:
+                self.splits[split] = []
+                for category, label in [('toxic', 1), ('nontoxic', 0)]:
+                    with open(os.path.join(args.data_dir, split, category), 'r') as rf:
+                        for line in rf:
+                            if len(line) > TOXICITY_MAX_LEN:
+                                line = ' '.join(line.strip()[:TOXICITY_MAX_LEN].split()[:-1]) # cutoff words until below max len
+                            if line.strip():
+                                self.splits[split].append((line.strip(), label))
 
         else: # topic / poetry
             for root, _, filenames in os.walk(args.data_dir):
@@ -216,7 +234,7 @@ class Dataset:
         print('split sizes:')
         for key in ['train', 'val', 'test']:
             print(key, len(self.splits[key]))
-        if not self.formality:
+        if not self.formality and not self.toxicity:
             print('total words', self.total_words)
             print('vocab size', len(self.index2word))
 
@@ -312,6 +330,18 @@ class SplitLoader(torch.utils.data.IterableDataset):
                     future_word = 'placeholder'
                     unstripped_future_word = future_word
                     future_word = future_word.strip().strip(string.punctuation) # NOTE: we didn't strip punctuation for the topic bag of words paper experiments for our method. it doesn't make much difference, though.
+                    word_log_prob, future_word = 0, 0
+                    pad_id = self.parent.gpt_pad_id
+                    example = (inp, length, future_word, word_log_prob, pad_id, classification_label, syllables_to_go, future_word_num_syllables, rhyme_group_index)
+                    valid = True
+            elif self.parent.toxicity:
+                future_word_num_syllables, rhyme_group_index, syllables_to_go = -1, -1, -1
+                raw_sentence, classification_label = self.data[self.pos]
+                sentence = self.parent.tokenizer.encode(raw_sentence, return_tensors='pt')[0]
+                length = len(sentence)
+
+                if len(sentence) > MIN_SENTENCE_LENGTH:
+                    inp = sentence # no need to split; we train on all possible prefixes simultaneously, labeled with the whole text's label
                     word_log_prob, future_word = 0, 0
                     pad_id = self.parent.gpt_pad_id
                     example = (inp, length, future_word, word_log_prob, pad_id, classification_label, syllables_to_go, future_word_num_syllables, rhyme_group_index)

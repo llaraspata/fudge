@@ -16,6 +16,7 @@ class Model(nn.Module):
 
         self.topic = args.task == 'topic'
         self.formality = args.task == 'formality'
+        self.toxicity = args.task == 'toxicity'
         self.iambic = args.task == 'iambic'
         self.rhyme = args.task == 'rhyme'
         self.newline = args.task == 'newline'
@@ -43,6 +44,11 @@ class Model(nn.Module):
 
         elif self.formality:
             self.marian_embed = nn.Embedding(gpt_pad_id + 1, HIDDEN_DIM, padding_idx=0) # 0 in marian is ''
+            self.rnn = nn.LSTM(HIDDEN_DIM, HIDDEN_DIM, num_layers=3, bidirectional=False, dropout=0.5) # want it to be causal so we can learn all positions
+            self.out_linear = nn.Linear(HIDDEN_DIM, 1)
+
+        elif self.toxicity:
+            self.lm_embed = nn.Embedding(gpt_pad_id + 1, HIDDEN_DIM, padding_idx=gpt_pad_id) # tokens of whichever base lm, gpt2 or marian
             self.rnn = nn.LSTM(HIDDEN_DIM, HIDDEN_DIM, num_layers=3, bidirectional=False, dropout=0.5) # want it to be causal so we can learn all positions
             self.out_linear = nn.Linear(HIDDEN_DIM, 1)
 
@@ -117,6 +123,14 @@ class Model(nn.Module):
             rnn_output = rnn_output.permute(1, 0, 2) # batch x seq x 300
             return self.out_linear(rnn_output).squeeze(2)
         
+        elif self.toxicity:
+            inputs = self.lm_embed(inputs)
+            inputs = pack_padded_sequence(inputs.permute(1, 0, 2), lengths.cpu(), enforce_sorted=False)
+            rnn_output, _ = self.rnn(inputs)
+            rnn_output, _ = pad_packed_sequence(rnn_output)
+            rnn_output = rnn_output.permute(1, 0, 2) # batch x seq x 300
+            return self.out_linear(rnn_output).squeeze(2) # logit of toxic at each prefix
+
         elif self.iambic:
             inputs = self.gpt_embed(inputs)
             inputs = pack_padded_sequence(inputs.permute(1, 0, 2), lengths.cpu(), enforce_sorted=False)
