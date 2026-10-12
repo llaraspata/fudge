@@ -16,69 +16,79 @@ from transformers import AutoTokenizer, AutoModelWithLMHead, pipeline, set_seed,
 
 from data import Dataset, load_rhyme_info
 from model import Model
-from util import save_checkpoint, ProgressMeter, AverageMeter, num_params
+from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, save_model_stats, ResourceTracker, default_stats_file
 from constants import *
 from lm import load_tokenizer, load_tokenizer_and_lm
 from poetry_util import get_rhymes, count_syllables
 from predict_poetry import predict_couplet
 
 def main(args):
-    with open(args.dataset_info, 'rb') as rf:
-        dataset_info = pickle.load(rf)
-    gpt_tokenizer, gpt_pad_id, gpt_model = load_tokenizer_and_lm(args.model_string, device=args.device)
+    tracker = ResourceTracker(args.device)
+    with tracker.phase('loading'):
+        with open(args.dataset_info, 'rb') as rf:
+            dataset_info = pickle.load(rf)
+        gpt_tokenizer, gpt_pad_id, gpt_model = load_tokenizer_and_lm(args.model_string, device=args.device)
 
-    checkpoint = torch.load(args.iambic_ckpt, map_location=args.device)
-    model_args = checkpoint['args']
-    iambic_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
-    iambic_model.load_state_dict(checkpoint['state_dict'])
-    iambic_model = iambic_model.to(args.device)
-    iambic_model.eval()
-    if args.verbose:
-        print("=> loaded checkpoint '{}' (epoch {})"
-                .format(args.iambic_ckpt, checkpoint['epoch']))
-        print('iambic model num params', num_params(iambic_model))
+        iambic_checkpoint = checkpoint = torch.load(args.iambic_ckpt, map_location=args.device)
+        model_args = checkpoint['args']
+        iambic_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
+        iambic_model.load_state_dict(checkpoint['state_dict'])
+        iambic_model = iambic_model.to(args.device)
+        iambic_model.eval()
+        if args.verbose:
+            print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.iambic_ckpt, checkpoint['epoch']))
+            print('iambic model num params', num_params(iambic_model))
 
-    with open(args.rhyme_info, 'rb') as rf:
-        rhyme_info = pickle.load(rf)
-    checkpoint = torch.load(args.rhyme_ckpt, map_location=args.device)
-    model_args = checkpoint['args']
-    rhyme_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word), rhyme_group_size=len(rhyme_info.index2rhyme_group), verbose=args.verbose) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
-    rhyme_model.load_state_dict(checkpoint['state_dict'])
-    rhyme_model = rhyme_model.to(args.device)
-    rhyme_model.eval()
-    if args.verbose:
-        print("=> loaded checkpoint '{}' (epoch {})"
-                .format(args.rhyme_ckpt, checkpoint['epoch']))
-        print('rhyme model num params', num_params(rhyme_model))
+        with open(args.rhyme_info, 'rb') as rf:
+            rhyme_info = pickle.load(rf)
+        rhyme_checkpoint = checkpoint = torch.load(args.rhyme_ckpt, map_location=args.device)
+        model_args = checkpoint['args']
+        rhyme_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word), rhyme_group_size=len(rhyme_info.index2rhyme_group), verbose=args.verbose) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
+        rhyme_model.load_state_dict(checkpoint['state_dict'])
+        rhyme_model = rhyme_model.to(args.device)
+        rhyme_model.eval()
+        if args.verbose:
+            print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.rhyme_ckpt, checkpoint['epoch']))
+            print('rhyme model num params', num_params(rhyme_model))
     
-    checkpoint = torch.load(args.newline_ckpt, map_location=args.device)
-    model_args = checkpoint['args']
-    newline_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
-    newline_model.load_state_dict(checkpoint['state_dict'])
-    newline_model = newline_model.to(args.device)
-    newline_model.eval()
-    if args.verbose:
-        print("=> loaded checkpoint '{}' (epoch {})"
-                .format(args.newline_ckpt, checkpoint['epoch']))
-        print('iambic model num params', num_params(newline_model))
+        newline_checkpoint = checkpoint = torch.load(args.newline_ckpt, map_location=args.device)
+        model_args = checkpoint['args']
+        newline_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
+        newline_model.load_state_dict(checkpoint['state_dict'])
+        newline_model = newline_model.to(args.device)
+        newline_model.eval()
+        if args.verbose:
+            print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.newline_ckpt, checkpoint['epoch']))
+            print('iambic model num params', num_params(newline_model))
 
     with open(args.prefix_file, 'r') as rf:
         lines = rf.readlines()
-    for line in tqdm(lines, total=len(lines)):
-        couplet = predict_couplet(gpt_model, 
-                gpt_tokenizer, 
-                iambic_model, 
-                rhyme_model,
-                newline_model,
-                [line], 
-                dataset_info, 
-                rhyme_info,
-                args.precondition_topk,
-                args.topk, 
-                condition_lambda=args.condition_lambda,
-                device=args.device)
-        assert len(couplet) == 2
-        print(couplet[1].strip().replace('\n', ''))
+    with tracker.phase('generation'):
+        for line in tqdm(lines, total=len(lines)):
+            couplet = predict_couplet(gpt_model, 
+                    gpt_tokenizer, 
+                    iambic_model, 
+                    rhyme_model,
+                    newline_model,
+                    [line], 
+                    dataset_info, 
+                    rhyme_info,
+                    args.precondition_topk,
+                    args.topk, 
+                    condition_lambda=args.condition_lambda,
+                    device=args.device)
+            assert len(couplet) == 2
+            print(couplet[1].strip().replace('\n', ''))
+
+    stats_file = args.stats_file or default_stats_file('poetry', args.model_string)
+    save_model_stats(stats_file, args.model_string, None, gpt_model, {
+        'iambic': (args.iambic_ckpt, iambic_checkpoint, iambic_model),
+        'rhyme': (args.rhyme_ckpt, rhyme_checkpoint, rhyme_model),
+        'newline': (args.newline_ckpt, newline_checkpoint, newline_model),
+    }, resources=tracker.summary(num_examples=len(lines)))
 
 
 if __name__=='__main__':
@@ -93,6 +103,7 @@ if __name__=='__main__':
     parser.add_argument('--model_string', type=str, default='openai-community/gpt2-medium')
 
     parser.add_argument('--prefix_file', type=str, default=None, required=True, help='file of prefix lines for couplets')
+    parser.add_argument('--stats_file', type=str, default=None, help='json file to save model statistics to (default: logs/model_stats/poetry_<model>_<timestamp>.json)')
 
     parser.add_argument('--precondition_topk', type=int, default=200, help='consider top k outputs from gpt at each step before conditioning and re-pruning')
     parser.add_argument('--topk', type=int, default=10, help='consider top k outputs from gpt at each step')

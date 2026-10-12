@@ -17,23 +17,25 @@ from transformers import AutoTokenizer, AutoModelWithLMHead, pipeline, set_seed,
 
 from data import Dataset
 from model import Model
-from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, pad_mask
+from util import save_checkpoint, ProgressMeter, AverageMeter, num_params, pad_mask, save_model_stats, ResourceTracker, default_stats_file
 from predict_topic import predict
 from constants import *
 from lm import load_tokenizer, load_tokenizer_and_lm
 
 
 def main(args):
-    with open(args.dataset_info, 'rb') as rf:
-        dataset_info = pickle.load(rf)
-    gpt_tokenizer, gpt_pad_id, gpt_model = load_tokenizer_and_lm(args.model_string, device=args.device)
+    tracker = ResourceTracker(args.device)
+    with tracker.phase('loading'):
+        with open(args.dataset_info, 'rb') as rf:
+            dataset_info = pickle.load(rf)
+        gpt_tokenizer, gpt_pad_id, gpt_model = load_tokenizer_and_lm(args.model_string, device=args.device)
 
-    checkpoint = torch.load(args.ckpt, map_location=args.device)
-    model_args = checkpoint['args']
-    conditioning_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
-    conditioning_model.load_state_dict(checkpoint['state_dict'])
-    conditioning_model = conditioning_model.to(args.device)
-    conditioning_model.eval()
+        checkpoint = torch.load(args.ckpt, map_location=args.device)
+        model_args = checkpoint['args']
+        conditioning_model = Model(model_args, gpt_pad_id, len(dataset_info.index2word)) # no need to get the glove embeddings when reloading since they're saved in model ckpt anyway
+        conditioning_model.load_state_dict(checkpoint['state_dict'])
+        conditioning_model = conditioning_model.to(args.device)
+        conditioning_model.eval()
     if args.verbose:
         print("=> loaded checkpoint '{}' (epoch {})"
                 .format(args.ckpt, checkpoint['epoch']))
@@ -73,34 +75,39 @@ def main(args):
                 conditions.append(c)
                 categories.append(category)
     
-    all_cr = []
-    pair_num = 0
-    for input_text, condition_words, category in tqdm(zip(input_texts, conditions, categories), total=len(conditions)):
-        predict_function = predict
-        condition_results = []
-        for i in range(0, args.sample_size, args.max_sample_batch):
-            num_samples = min(args.max_sample_batch, args.sample_size - i)
-            condition_results += predict_function(gpt_model, 
-                            gpt_tokenizer, 
-                            conditioning_model, 
-                            [input_text for _ in range(num_samples)],
-                            condition_words,
-                            dataset_info, 
-                            args.precondition_topk,
-                            args.topk, 
-                            args.length_cutoff,
-                            condition_lambda=args.condition_lambda,
-                            device=args.device)
-        all_cr.append((input_text, category, condition_results))
-        pair_num += 1
-        if args.max_pairs > 0 and pair_num >= args.max_pairs:
-            break
+    with tracker.phase('generation'):
+        all_cr = []
+        pair_num = 0
+        for input_text, condition_words, category in tqdm(zip(input_texts, conditions, categories), total=len(conditions)):
+            predict_function = predict
+            condition_results = []
+            for i in range(0, args.sample_size, args.max_sample_batch):
+                num_samples = min(args.max_sample_batch, args.sample_size - i)
+                condition_results += predict_function(gpt_model, 
+                                gpt_tokenizer, 
+                                conditioning_model, 
+                                [input_text for _ in range(num_samples)],
+                                condition_words,
+                                dataset_info, 
+                                args.precondition_topk,
+                                args.topk, 
+                                args.length_cutoff,
+                                condition_lambda=args.condition_lambda,
+                                device=args.device)
+            all_cr.append((input_text, category, condition_results))
+            pair_num += 1
+            if args.max_pairs > 0 and pair_num >= args.max_pairs:
+                break
     with open(args.log_file, 'w') as wf:
         writer = csv.DictWriter(wf, fieldnames=['category', 'input_text', 'generation'])
         writer.writeheader()
         for cr_group in all_cr:
             for cr in cr_group[2]:
                 writer.writerow({'category': cr_group[1], 'input_text': cr_group[0], 'generation': cr})
+
+    stats_file = args.stats_file or default_stats_file('topic', args.model_string)
+    save_model_stats(stats_file, args.model_string, None, gpt_model, {'topic': (args.ckpt, checkpoint, conditioning_model)},
+                     resources=tracker.summary(num_examples=sum(len(cr_group[2]) for cr_group in all_cr)))
 
 
 if __name__=='__main__':
@@ -111,6 +118,7 @@ if __name__=='__main__':
     parser.add_argument('--log_file', type=str, required=True, help='file to write outputs to (csv format)')
     parser.add_argument('--dataset_info', type=str, required=True, help='saved dataset info')
     parser.add_argument('--model_string', type=str, default='openai-community/gpt2-medium')
+    parser.add_argument('--stats_file', type=str, default=None, help='json file to save model statistics to (default: logs/model_stats/topic_<model>_<timestamp>.json)')
 
     parser.add_argument('--condition_file', type=str, default=None, help='file of inputs and conditions')
     parser.add_argument('--prefix_file', type=str, default=None, help='prefix set')
