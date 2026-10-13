@@ -1,4 +1,6 @@
 import os
+import pickle
+import types
 
 import torch
 import transformers
@@ -60,14 +62,38 @@ def encode_for_predictor(tokenizer, text, return_tensors=None):
     return ids
 
 
+class _MissingClass:
+    """
+    Stand-in for a pickled class whose module is not installed (e.g. pytorch_lightning callbacks in the Marian .ckpt).
+    """
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __setstate__(self, state):
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+
+
+class _LenientUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        try:
+            return super().find_class(module, name)
+        except (ModuleNotFoundError, AttributeError):
+            return _MissingClass
+
+
+_lenient_pickle = types.SimpleNamespace(Unpickler=_LenientUnpickler, load=lambda f, **kw: _LenientUnpickler(f, **kw).load(), __name__='pickle')
+
+
 def load_checkpoint(path, map_location='cpu'):
     """
     torch.load for our checkpoints, which pickle the training args: torch >= 2.6 only loads plain weights by default.
+    Classes from packages that are not installed (e.g. pytorch_lightning) are replaced with placeholders, only the weights matter.
     """
     try:
-        return torch.load(path, map_location=map_location, weights_only=False)
+        return torch.load(path, map_location=map_location, weights_only=False, pickle_module=_lenient_pickle)
     except TypeError: # torch < 1.13 has no weights_only
-        return torch.load(path, map_location=map_location)
+        return torch.load(path, map_location=map_location, pickle_module=_lenient_pickle)
 
 
 def load_lm(model_string, device='cuda', model_path=None, dtype=None, **kwargs):
@@ -101,7 +127,12 @@ def load_lm(model_string, device='cuda', model_path=None, dtype=None, **kwargs):
             for key in ckpt['state_dict'].keys():
                 assert key.startswith('model.')
                 state_dict[key[6:]] = ckpt['state_dict'][key]
-            model.load_state_dict(state_dict)
+            # checkpoints from older transformers have no lm_head.weight: it is tied to the input embeddings
+            missing, unexpected = model.load_state_dict(state_dict, strict=False)
+            tied = set(getattr(model, '_tied_weights_keys', None) or []) | {'lm_head.weight'}
+            if set(missing) - tied or unexpected:
+                raise RuntimeError('error loading {}: missing keys {}, unexpected keys {}'.format(model_path, missing, unexpected))
+            model.tie_weights()
 
     model = model.to(device)
     model.eval()

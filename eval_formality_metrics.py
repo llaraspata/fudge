@@ -72,5 +72,6 @@ if __name__=='__main__':
             .format(args.ckpt, checkpoint['epoch']))
     print('num params', num_params(conditioning_model))
 
+    print('avg formality prob according to model')
     print('avg formality prob according to model', avg_formality(pred, conditioning_model, tokenizer, device=args.device))
 

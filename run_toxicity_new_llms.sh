@@ -37,7 +37,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-MODELS="${MODELS:-llama32_1b llama32_3b gemma4_e2b gemma4_e4b qwen25_0_5b qwen25_1_5b qwen25_3b}"
+MODELS="${MODELS:-gpt2_medium llama32_1b llama32_3b gemma4_e2b gemma4_e4b qwen25_0_5b qwen25_1_5b qwen25_3b}"
 NUM_PROMPTS="${NUM_PROMPTS:-}"
 TARGET="${TARGET:-nontoxic}"
 CONDITION_LAMBDA="${CONDITION_LAMBDA:-1.0}"
