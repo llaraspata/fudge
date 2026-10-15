@@ -2,13 +2,16 @@
 Collects the metrics of every run under logs/ into one csv, one row per (method, task, model), ready to plot
 the chosen metric of each task against the language model's size.
 
-Each run is a results_<tag>.log (output of eval_<task>_metrics.py) paired with the stats_<tag>.json written
-next to it (language model's name and number of parameters). The task is the first directory under the logs dir
-(logs/formality/..., logs/toxicity/<run_id>/...).
+logs/fudge/<task>/...: each run is a results_<tag>.log (output of eval_<task>_metrics.py) paired with the
+    stats_<tag>.json written next to it (language model's name and number of parameters). The task is the first
+    directory under logs/fudge (logs/fudge/formality/..., logs/fudge/toxicity/<run_id>/...).
+logs/nado/<task>_<model>.log: each run is the stdout of a NADO run, whose last line points to the stats json in
+    logs/nado/model_stats/ (language model and, once the run is complete, its metrics). The *.condor.log files are
+    skipped. NADO metric names are renamed to the FUDGE ones (NADO_METRICS) so that both share the same columns.
 
 Usage:
-    python results/log_parser.py                                  # FUDGE logs in logs/ -> results/metrics.csv
-    python results/log_parser.py --logs_dir ../nado/logs --method NADO --out results/metrics.csv --append
+    python results/log_parser.py                                  # logs/fudge + logs/nado -> results/metrics.csv
+    python results/log_parser.py --methods NADO --out results/nado.csv
 """
 import argparse
 import csv
@@ -25,6 +28,20 @@ PLOT_METRICS = {
 
 # "<label> <number>" or "<label>: <number>" lines of a results log
 METRIC_LINE = re.compile(r'^(?P<label>[^=].*?):?\s+(?P<value>[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)$')
+
+# NADO metric name -> FUDGE label of the same metric (eval_<task>_metrics.py), unknown names are kept as they are
+NADO_METRICS = {
+    'avg_toxic_prob': 'avg toxicity prob according to model',
+    'frac_toxic': 'fraction toxic according to model (prob >= 0.5)',
+    'perplexity': 'perplexity under openai-community/gpt2-large',
+    'bleu': 'BLEU score',
+}
+
+# logs/nado/<task>_<model>.log
+NADO_LOG = re.compile(r'^(?P<task>[a-z]+)_(?P<model>.+)\.log$')
+NADO_STATS_LINE = re.compile(r'^Saved run statistics to (?P<path>\S+\.json)$')
+# NADO prints its "<name> <number>" metrics after this line (before it: training losses, epochs, ...)
+NADO_METRICS_START = 'Saved generations to'
 
 # what follows the model in a tag: _nontoxic_lambda1.0, _formal, ...
 TAG_SUFFIX = re.compile(r'_(nontoxic|toxic|formal|informal)(_.*)?$')
@@ -59,7 +76,29 @@ def find_stats(results_path):
     return None
 
 
-def collect(logs_dir, method):
+def make_row(method, task, model, run, results_path, stats_path, lm, metrics):
+    plot_metric = PLOT_METRICS.get(task)
+    if plot_metric not in metrics:
+        print('WARNING: no "{}" in {}, skipping it (incomplete run?)'.format(plot_metric, results_path))
+        return None
+    row = {
+        'method': method,
+        'task': task,
+        'model': model,
+        'lm_name': lm['name'],
+        'lm_params': lm['num_params'],
+        'lm_params_b': lm['num_params'] / 1e9,
+        'plot_metric': plot_metric,
+        'plot_value': metrics[plot_metric],
+        'run': run,
+        'results_file': results_path,
+        'stats_file': stats_path,
+    }
+    row.update(metrics)
+    return row
+
+
+def collect_fudge(logs_dir, method='FUDGE'):
     rows = []
     for dirpath, _, filenames in sorted(os.walk(logs_dir)):
         for name in sorted(filenames):
@@ -78,39 +117,96 @@ def collect(logs_dir, method):
             with open(stats_path) as f:
                 lm = json.load(f)['language_model']
 
-            metrics = parse_results(results_path)
-            plot_metric = PLOT_METRICS.get(task)
-            if plot_metric not in metrics:
-                print('WARNING: no "{}" in {}, skipping it (incomplete run?)'.format(plot_metric, results_path))
-                continue
+            row = make_row(method, task, TAG_SUFFIX.sub('', tag), run, results_path, stats_path, lm,
+                           parse_results(results_path))
+            if row is not None:
+                rows.append(row)
+    return rows
 
-            row = {
-                'method': method,
-                'task': task,
-                'model': TAG_SUFFIX.sub('', tag),
-                'lm_name': lm['name'],
-                'lm_params': lm['num_params'],
-                'lm_params_b': lm['num_params'] / 1e9,
-                'plot_metric': plot_metric,
-                'plot_value': metrics[plot_metric],
-                'run': run,
-                'results_file': results_path,
-                'stats_file': stats_path,
-            }
-            row.update(metrics)
+
+def find_nado_stats(log_path, task, model):
+    """stats json named in the "Saved run statistics to ..." line of the log (a path relative to the NADO repo,
+    looked up by name in model_stats/ next to the log), or, if missing, the latest <task>_nado_<model>_*.json"""
+    stats_dir = os.path.join(os.path.dirname(log_path), 'model_stats')
+    with open(log_path) as f:
+        for line in f:
+            match = NADO_STATS_LINE.match(line.strip())
+            if match:
+                path = os.path.join(stats_dir, os.path.basename(match.group('path')))
+                if os.path.exists(path):
+                    return path
+    if not os.path.isdir(stats_dir):
+        return None
+    prefix = '{}_nado_{}_'.format(task, model)
+    candidates = sorted(n for n in os.listdir(stats_dir)
+                        if n.startswith(prefix) and n.endswith('.json') and re.fullmatch(r'\d{8}-\d{6}', n[len(prefix):-len('.json')]))
+    return os.path.join(stats_dir, candidates[-1]) if candidates else None
+
+
+def parse_nado_log(path):
+    """"<name> <number>" lines printed after the generations are saved"""
+    metrics = {}
+    started = False
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith(NADO_METRICS_START):
+                started, metrics = True, {}  # keep only the last evaluation of the log
+                continue
+            match = METRIC_LINE.match(line) if started else None
+            if match:
+                metrics[match.group('label')] = float(match.group('value'))
+    return metrics
+
+
+def collect_nado(logs_dir, method='NADO'):
+    rows = []
+    for name in sorted(os.listdir(logs_dir)):
+        match = NADO_LOG.match(name)
+        if match is None or name.endswith('.condor.log'):
+            continue
+        log_path = os.path.join(logs_dir, name)
+        task, model = match.group('task'), match.group('model')
+
+        stats_path = find_nado_stats(log_path, task, model)
+        if stats_path is None:
+            print('WARNING: no stats file for {}, skipping it'.format(log_path))
+            continue
+        with open(stats_path) as f:
+            stats = json.load(f)
+
+        # metrics saved in the stats json, or, for older runs, printed in the log
+        nado_metrics = stats.get('metrics') or parse_nado_log(log_path)
+        metrics = {NADO_METRICS.get(k, k): float(v) for k, v in nado_metrics.items()}
+        row = make_row(method, task, model, '', log_path, stats_path, stats['language_model'], metrics)
+        if row is not None:
             rows.append(row)
     return rows
 
 
+# method -> (subdir of the logs dir, collector)
+METHODS = {
+    'FUDGE': ('fudge', collect_fudge),
+    'NADO': ('nado', collect_nado),
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description='collect the metrics of the runs in a logs dir into one csv')
-    parser.add_argument('--logs_dir', type=str, default='logs', help='logs/<task>/... dir to scan')
-    parser.add_argument('--method', type=str, default='FUDGE', help='name of the method that produced the logs')
+    parser.add_argument('--logs_dir', type=str, default='logs', help='dir with a fudge/ and a nado/ subdir to scan')
+    parser.add_argument('--methods', nargs='+', default=list(METHODS), choices=list(METHODS), help='methods to collect')
     parser.add_argument('--out', type=str, default='results/metrics.csv', help='csv to write')
-    parser.add_argument('--append', action='store_true', help='add the rows to an existing --out (e.g. a second method)')
+    parser.add_argument('--append', action='store_true', help='add the rows to an existing --out')
     args = parser.parse_args()
 
-    rows = collect(args.logs_dir, args.method)
+    rows = []
+    for method in args.methods:
+        subdir, collect = METHODS[method]
+        method_dir = os.path.join(args.logs_dir, subdir)
+        if not os.path.isdir(method_dir):
+            print('WARNING: no {} dir, skipping {}'.format(method_dir, method))
+            continue
+        rows += collect(method_dir, method)
     if args.append and os.path.exists(args.out):
         with open(args.out) as f:
             rows = list(csv.DictReader(f)) + rows
